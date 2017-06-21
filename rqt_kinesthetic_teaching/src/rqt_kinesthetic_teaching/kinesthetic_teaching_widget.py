@@ -43,6 +43,7 @@ class KinestheticTeachingWidget(QWidget):
         self.demoLocationButton.setIcon(QIcon.fromTheme("document-open"))
         self.demoFolderLocationButton.setIcon(QIcon.fromTheme("folder"))
         self.playDemoButton.setIcon(QIcon.fromTheme("media-playback-start"))
+        self.previewArmButton.setIcon(QIcon.fromTheme("view-fullscreen"))
 
         # Attach event handlers
         self.demoLocationButton.clicked[bool].connect(self.browseForLocation)
@@ -56,6 +57,7 @@ class KinestheticTeachingWidget(QWidget):
         self.closeHandButton.clicked[bool].connect(self.closeHand)
         self.endButton.clicked[bool].connect(self.endKeyframe)
         self.playDemoButton.clicked[bool].connect(self.playDemo)
+        self.previewArmButton.clicked[bool].connect(self.previewDemo)
         self.enableKIBox.stateChanged.connect(self.enableKI)
         self.locateObjectsBox.stateChanged.connect(self.locateObjectsChanged)
 
@@ -200,6 +202,7 @@ class KinestheticTeachingWidget(QWidget):
             self.keyframeCount.setText("{} keyframe(s) loaded from {} files".format(totalFrames, len(locations)))
         self._showStatus("Parsed {} keyframe(s).".format(totalFrames))
         self.playDemoButton.setEnabled(True)
+        self.previewArmButton.setEnabled(True)
         if self.locateObjectsBox.isChecked():
             self.zeroMarker.setEnabled(True)
     
@@ -209,6 +212,7 @@ class KinestheticTeachingWidget(QWidget):
             return
         self.demoLocation.setText(location)
         self.playDemoButton.setEnabled(False)
+        self.previewArmButton.setEnabled(False)
         self.zeroMarker.clear()
         self.zeroMarker.setEnabled(False)
         self.startTrajectoryButton.setEnabled(True)
@@ -321,11 +325,13 @@ class KinestheticTeachingWidget(QWidget):
                 rospy.logwarn("Recording saved but cannot be opened automatically because the end keyframe was written from a different thread. Please open the .bag file manually.")
                 rospy.loginfo("Recording saved to {}".format(self.kinesthetic_interaction.demonstration.filename))
 
+    def previewDemo(self):
+        self.playDemo(visualize="only")
     def _playDemoHandler(self, signum, frame):
         msg = "Could not load playback keyframe demo server. Run `roslaunch hlpr_record_demonstration start_playback_services.launch`."
         rospy.logerr(msg)
         raise TimeoutException(msg)
-    def playDemo(self):
+    def playDemo(self, visualize="true"):
         location = self.demoLocation.text()
         self.keyframeBagInterface = KeyframeBagInterface()
 
@@ -357,6 +363,6 @@ class KinestheticTeachingWidget(QWidget):
         if zeroMarker is not None and os.path.isdir(self.demoLocation.text()):
             zeroMarker = zeroMarker.split(u" → ")[0]
 
-        self.keyframeBagInterface.play(location, zeroMarker, self.playDemoDone)
+        self.keyframeBagInterface.play(location, zeroMarker, visualize, self.playDemoDone)
     def playDemoDone(self, feedback):
         print(feedback)

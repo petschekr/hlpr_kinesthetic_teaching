@@ -224,6 +224,19 @@
        <item row="5" column="0">
         <layout class="QHBoxLayout" name="horizontalLayout_5">
          <item>
+          <widget class="QPushButton" name="previewArmButton">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+           <property name="text">
+            <string> Preview arm trajectory</string>
+           </property>
+           <property name="icon">
+            <iconset theme="view-fullscreen"/>
+           </property>
+          </widget>
+         </item>
+         <item>
           <widget class="QPushButton" name="playDemoButton">
            <property name="enabled">
             <bool>false</bool>

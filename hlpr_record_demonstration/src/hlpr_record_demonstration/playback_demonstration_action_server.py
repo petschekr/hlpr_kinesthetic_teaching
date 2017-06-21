@@ -50,8 +50,9 @@ from hlpr_record_demonstration.msg import (PlaybackKeyframeDemoAction,
                                            PlaybackKeyframeDemoFeedback,
                                            PlaybackKeyframeDemoGoal,
                                            PlaybackKeyframeDemoResult)
+from moveit_msgs.msg import DisplayTrajectory
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Int32, String
+from std_msgs.msg import Header, Int32, String
 
 
 # PlaybackKFDemoAction:
@@ -126,6 +127,7 @@ class PlaybackKFDemoAction(object):
         tfBuffer = tf2_ros.Buffer()
         tfListener = tf2_ros.TransformListener(tfBuffer)
         tfBroadcaster = tf2_ros.TransformBroadcaster()
+        trajectoryVisualizerPublisher = rospy.Publisher("move_group/display_planned_path", DisplayTrajectory, queue_size=5)
 
         # Check if the bag file is valid
         # Example path if necessary
@@ -147,6 +149,7 @@ class PlaybackKFDemoAction(object):
                 return
 
             keyframe_count = 0
+            lastState = moveit_commander.RobotCommander().get_current_state()
 
             # Check if we have a gripper topic. If so add it to playback 
             all_topics = self.bag.get_type_and_topic_info().topics.keys()
@@ -259,16 +262,38 @@ class PlaybackKFDemoAction(object):
                     if plan == None or len(plan.joint_trajectory.points) < 1:
                         print "Error: no plan found"
                     else:
-                        rospy.loginfo("Executing Keyframe: %d" % keyframe_count)
-                        self.sendPlan(plan)
-                        keyframe_count+=1
+                        if goal.visualize != "false":
+                            rospy.loginfo("Visualizing Keyframe: %d" % keyframe_count)
+                            # Visualize plan
+                            display = DisplayTrajectory()
+                            display.trajectory.append(plan)
+                            display.model_id = "vector"
+                            lastState.joint_state.header = Header(frame_id="/odom")
+                            lastState.multi_dof_joint_state.header = Header(frame_id="/odom")
+                            display.trajectory_start = lastState
+                            trajectoryVisualizerPublisher.publish(display)
+                            # Compute new state
+                            # for trajectoryIndex, trajectoryJointName in enumerate(plan.joint_trajectory.joint_names):
+                            #     for stateIndex, stateJointName in enumerate(lastState.joint_state.name):
+                            #         if trajectoryJointName == stateJointName:
+                            #             position = list(lastState.joint_state.position)
+                            #             print "Setting {} to {} from {}".format(trajectoryJointName, plan.joint_trajectory.points[-1].positions[trajectoryIndex], position[stateIndex])
+                            #             position[stateIndex] = plan.joint_trajectory.points[-1].positions[trajectoryIndex]
+                            #             lastState.joint_state.position = tuple(position)
+                            # Wait 1 second between visualizations so that the user can actually see them
+                            rospy.sleep(1)
+                        if goal.visualize != "only":
+                            rospy.loginfo("Executing Keyframe: %d" % keyframe_count)
+                            self.sendPlan(plan)
+                        keyframe_count += 1
 
-                    # Execute Gripper if needed
-                    for gripper_topic in gripper_topics:
-                        pos = gripper_msgs[gripper_topic][msg_count].requested_position
-                        if abs(pos - self.gripper_pos[gripper_topic]) > self.GRIPPER_THRESHOLD:
-                            # Actually set the gripper value
-                            self.gripper_helper(gripper_topic, pos)
+                    if goal.visualize != "only":
+                        # Execute Gripper if needed
+                        for gripper_topic in gripper_topics:
+                            pos = gripper_msgs[gripper_topic][msg_count].requested_position
+                            if abs(pos - self.gripper_pos[gripper_topic]) > self.GRIPPER_THRESHOLD:
+                                # Actually set the gripper value
+                                self.gripper_helper(gripper_topic, pos)
                 
                 self.result.time_elapsed = rospy.Duration.from_sec(time.time() - self.start_time)
                 complete_msg = "Playback Keyframe Demo completed successfully"
