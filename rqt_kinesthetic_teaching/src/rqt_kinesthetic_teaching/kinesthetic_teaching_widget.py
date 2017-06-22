@@ -3,6 +3,7 @@ import os
 import signal
 import threading
 import time
+import unicodedata
 
 import rosbag
 import rospkg
@@ -326,12 +327,12 @@ class KinestheticTeachingWidget(QWidget):
                 rospy.loginfo("Recording saved to {}".format(self.kinesthetic_interaction.demonstration.filename))
 
     def previewDemo(self):
-        self.playDemo(visualize="only")
+        self.playDemo(qtArg=None, visualize="only")
     def _playDemoHandler(self, signum, frame):
         msg = "Could not load playback keyframe demo server. Run `roslaunch hlpr_record_demonstration start_playback_services.launch`."
         rospy.logerr(msg)
         raise TimeoutException(msg)
-    def playDemo(self, visualize="true"):
+    def playDemo(self, qtArg, visualize="true"):
         location = self.demoLocation.text()
         self.keyframeBagInterface = KeyframeBagInterface()
 
@@ -359,10 +360,17 @@ class KinestheticTeachingWidget(QWidget):
 
         self._showStatus("Playing...")
         rospy.loginfo("Playing {}".format(location))
+
         zeroMarker = self.zeroMarker.currentText() if self.kinesthetic_interaction.should_locate_objects else None
         if zeroMarker is not None and os.path.isdir(self.demoLocation.text()):
             zeroMarker = zeroMarker.split(u" → ")[0]
 
-        self.keyframeBagInterface.play(location, zeroMarker, visualize, self.playDemoDone)
+        self.keyframeBagInterface.play(self._deunicode(location), self._deunicode(zeroMarker), visualize, self.playDemoDone)
     def playDemoDone(self, feedback):
         print(feedback)
+    
+    def _deunicode(self, string):
+        if string is not None:
+            return unicodedata.normalize("NFKD", string).encode("ascii", "ignore")
+        else:
+            return None

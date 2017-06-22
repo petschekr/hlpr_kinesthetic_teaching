@@ -31,26 +31,32 @@
 # Author: Andrea Thomaz, athomaz@diligentdroids.com
 # Complete refactor 11/10/2016: Vivian Chu, vchu@diligentdroids.com
 
-import actionlib
 import cPickle
 import os
+from collections import defaultdict
+
+import actionlib
+import numpy as np
 import rosbag
 import rospy
+import tf2_geometry_msgs
+import tf2_ros
 import yaml
-import numpy as np
-
-from collections import defaultdict
-from hlpr_record_demonstration.playback_plan_object import PlaybackPlanObject
-from hlpr_manipulation_utils.manipulator import Manipulator, Gripper
-from hlpr_manipulation_utils.arm_moveit import ArmMoveIt
-from hlpr_record_demonstration.msg import PlaybackKeyframeDemoAction, PlaybackKeyframeDemoGoal, PlaybackKeyframeDemoResult, PlaybackKeyframeDemoFeedback
-from geometry_msgs.msg import Pose, Point, Quaternion
-from moveit_msgs.msg import DisplayTrajectory, RobotTrajectory
-from vector_msgs.msg import GripperStat
-from sensor_msgs.msg import JointState
 from control_msgs.msg import FollowJointTrajectoryGoal
-from std_msgs.msg import Bool
 from data_logger_bag.msg import LogControl
+from geometry_msgs.msg import Point, Pose, PoseStamped, Quaternion
+from hlpr_manipulation_utils.arm_moveit import ArmMoveIt
+from hlpr_manipulation_utils.manipulator import Gripper, Manipulator
+from hlpr_record_demonstration.msg import (PlaybackKeyframeDemoAction,
+                                           PlaybackKeyframeDemoFeedback,
+                                           PlaybackKeyframeDemoGoal,
+                                           PlaybackKeyframeDemoResult)
+from hlpr_record_demonstration.playback_plan_object import PlaybackPlanObject
+from moveit_msgs.msg import DisplayTrajectory, RobotTrajectory
+from sensor_msgs.msg import JointState
+from std_msgs.msg import Bool
+from vector_msgs.msg import GripperStat
+
 
 class PlaybackKFDemoAction(object):
 
@@ -112,6 +118,11 @@ class PlaybackKFDemoAction(object):
         # Store the current joint states
         self.current_joint_state = dict()
 
+        # Set up transforms
+        self.tfBuffer = tf2_ros.Buffer()
+        self.tfListener = tf2_ros.TransformListener(self.tfBuffer)
+        self.tfBroadcaster = tf2_ros.TransformBroadcaster()
+
     def _gripper_update(self, msg):
         self.gripper_pos = msg.position
 
@@ -142,7 +153,7 @@ class PlaybackKFDemoAction(object):
         # Check what kind of file we've received (bag vs. pkl)
         if filename.endswith('.bag'):
             # Process the bag file
-            (self.data_store, joint_flag) = self._process_bag(filename, goal.target_topic)
+            (self.data_store, joint_flag) = self._process_bag(filename, goal.target_topic, goal.zero_marker)
             if self.data_store is None:
                 return
     
@@ -189,63 +200,63 @@ class PlaybackKFDemoAction(object):
         rospy.loginfo(complete_msg)
         return
 
-    def _process_bag(self, filename, target_topic):
+    def _process_bag(self, filename, target_topic, zeroMarkerLabel):
         '''Heavy lifting process that actually converts bag files to plans'''
 
         # Open the bag file
-        self.bag = rosbag.Bag(filename) 
-       
-        # Check if number of keyframes - sanity check if accidentally given trajectory 
-        if self.bag.get_message_count() > self.KEYFRAME_THRESHOLD:
-            error_msg = "Playback Keyframe Demo aborted due to too many frames: %d" % self.bag.get_message_count()
-            self.server.set_aborted(self.result, error_msg)
-            rospy.logerr(error_msg)
-            return
+        with rosbag.Bag(filename) as self.bag:
 
-        # Pull out information about the bagfile
-        bag_info = yaml.load(self.bag._get_yaml_info())
+            # Check if number of keyframes - sanity check if accidentally given trajectory 
+            if self.bag.get_message_count() > self.KEYFRAME_THRESHOLD:
+                error_msg = "Playback Keyframe Demo aborted due to too many frames: %d" % self.bag.get_message_count()
+                self.server.set_aborted(self.result, error_msg)
+                rospy.logerr(error_msg)
+                return
 
-        # Pull out the number of messages per topic
-        total_keyframes = [x['messages'] for x in bag_info['topics']]
-        total_keyframes = list(set(total_keyframes)) 
+            # Pull out information about the bagfile
+            bag_info = yaml.load(self.bag._get_yaml_info())
 
-        # Check if keyframes are aligned
-        if len(total_keyframes) > 1:
-            error_msg = "Provided bag file does not have aligned keyframes. Exiting"
-            self.server.set_aborted(self.result, error_msg)
-            rospy.logerr(error_msg)
-            return 
-        else:
-            total_keyframes = total_keyframes[0]
+            # Pull out the number of messages per topic
+            total_keyframes = [x['messages'] for x in bag_info['topics']]
+            total_keyframes = list(set(total_keyframes)) 
 
-        # Pull out the gripper topic
-        topics = self.bag.get_type_and_topic_info().topics.keys() 
-        gripper_topic = [x['topic'] for x in bag_info['topics'] if x['type'] == self.GRIPPER_MSG_TYPE]
-        if len(gripper_topic) == 0:
-            rospy.loginfo("No gripper topics detected - will not include gripper")
-        else:    
-            if len(gripper_topic) > 1:
-                rospy.logwarn('More than one gripper topic: %s' % ', '.join(gripper_topic))
-                rospy.logwarn('Will only use values from topic: %s' % gripper_topic[0])
-            gripper_topic = gripper_topic[0] # We assume there is one - warn otherwise
+            # Check if keyframes are aligned
+            if len(total_keyframes) > 1:
+                error_msg = "Provided bag file does not have aligned keyframes. Exiting"
+                self.server.set_aborted(self.result, error_msg)
+                rospy.logerr(error_msg)
+                return 
+            else:
+                total_keyframes = total_keyframes[0]
 
-        # Store the messages
-        data_store = defaultdict(dict)
-        msg_store = dict()
+            # Pull out the gripper topic
+            topics = self.bag.get_type_and_topic_info().topics.keys() 
+            gripper_topic = [x['topic'] for x in bag_info['topics'] if x['type'] == self.GRIPPER_MSG_TYPE]
+            if len(gripper_topic) == 0:
+                rospy.loginfo("No gripper topics detected - will not include gripper")
+            else:    
+                if len(gripper_topic) > 1:
+                    rospy.logwarn('More than one gripper topic: %s' % ', '.join(gripper_topic))
+                    rospy.logwarn('Will only use values from topic: %s' % gripper_topic[0])
+                gripper_topic = gripper_topic[0] # We assume there is one - warn otherwise
 
-        # Read the messages - cycle through and store in dictionary
-        for topic, msg, t in self.bag.read_messages(): 
-            if topic not in msg_store:
-                msg_store[topic] = []
+            # Store the messages
+            data_store = defaultdict(dict)
+            msg_store = dict()
 
-            msg_store[topic].append((msg,t))
+            # Read the messages - cycle through and store in dictionary
+            for topic, msg, t in self.bag.read_messages(): 
+                if topic not in msg_store:
+                    msg_store[topic] = []
 
-        # Check what kind of target type (joints vs. EEF)
-        target_type = self.bag.get_type_and_topic_info().topics[target_topic].msg_type
-        if target_type == 'sensor_msgs/JointState':
-            joint_flag = True
-        else:
-            joint_flag = False
+                msg_store[topic].append((msg,t))
+
+            # Check what kind of target type (joints vs. EEF)
+            target_type = self.bag.get_type_and_topic_info().topics[target_topic].msg_type
+            if target_type == 'sensor_msgs/JointState':
+                joint_flag = True
+            else:
+                joint_flag = False
 
         # We don't store off the original messages because they don't pickle well
         #data_store['msgs'] = msg_store 
@@ -264,9 +275,67 @@ class PlaybackKFDemoAction(object):
             if joint_flag:
                 target = self._get_arm_joint_values(data[0])
             else:
+                if zeroMarkerLabel:
+                    zeroMarker = None
+                    OBJECT_LOCATION_TOPIC = "object_location"
+                    if not OBJECT_LOCATION_TOPIC in msg_store:
+                        rospy.logerr("Playback specified a zero marker but no object locations were found in keyframe #{}".format(i))
+                        self.server.set_aborted(text="Object locations missing")
+                        return
+                    
+                    for i, location in enumerate(msg_store[OBJECT_LOCATION_TOPIC][i][0].objects):
+                        if location.label == zeroMarkerLabel:
+                            zeroMarker = location
+                            break
+                    
+                    if not zeroMarker:
+                        rospy.logerr("Specified zero marker not found in .bag file in keyframe #{}".format(i))
+                        self.server.set_aborted(text="Zero marker not found in .bag file")
+                        return
+                    
+                    try:
+                        currentZero = self.tfBuffer.lookup_transform("map", zeroMarkerLabel, rospy.Time(0), timeout=rospy.Duration(5)).transform
+                    except tf2_ros.LookupException:
+                        rospy.logerr("Specified label \"{}\" not found in current scene. Disable locate objects to play back absolute keyframe positions.".format(zeroMarkerLabel))
+                        self.server.set_aborted(text="Specified label not found")
+                        return
+                    rospy.loginfo("Using zero marker \"{}\" (prob: {:.1%}) with position (x: {:.2f}, y: {:.2f}, z: {:.2f})".format(
+                        zeroMarker.label,
+                        zeroMarker.probability,
+                        zeroMarker.pose.position.x,
+                        zeroMarker.pose.position.y,
+                        zeroMarker.pose.position.z
+                    ))
+                    rospy.loginfo("Found corresponding zero marker in current frame (x: {:.2f}, y: {:.2f}, z: {:.2f})".format(
+                        currentZero.translation.x,
+                        currentZero.translation.y,
+                        currentZero.translation.z
+                    ))
+                else:
+                    rospy.loginfo("No zero marker passed for keyframe #{}".format(i))
+
                 pos = data[0].position
                 rot = data[0].orientation
                 target = Pose(Point(pos.x, pos.y, pos.z), Quaternion(rot.x, rot.y, rot.z, rot.w))
+
+                if zeroMarker:
+                    # Remap the point to the global map frame for adjustment
+                    baseLinkToMap = self.tfBuffer.lookup_transform("map", "base_link", rospy.Time(0), timeout=rospy.Duration(5))
+                    mapToBaseLink = self.tfBuffer.lookup_transform("base_link", "map", rospy.Time(0), timeout=rospy.Duration(5))
+                    ptAbsolute = tf2_geometry_msgs.do_transform_pose(PoseStamped(pose=target), baseLinkToMap)
+
+                    # Compensate for new zero marker position
+                    ptAbsolute.pose.position.x += (currentZero.translation.x - zeroMarker.pose.position.x)
+                    ptAbsolute.pose.position.y += (currentZero.translation.y - zeroMarker.pose.position.y)
+                    ptAbsolute.pose.position.z += (currentZero.translation.z - zeroMarker.pose.position.z)
+
+                    target = tf2_geometry_msgs.do_transform_pose(ptAbsolute, mapToBaseLink).pose
+
+                    rospy.loginfo("Moving EEF to adjusted position: (x: {:.2f}, y: {:.2f}, z: {:.2f})".format(
+                        target.position.x,
+                        target.position.y,
+                        target.position.z
+                    ))
 
             # Store away values
             plan_obj.set_target_val(target)
@@ -491,7 +560,3 @@ if __name__ =='__main__':
   rospy.init_node('playback_keyframe_demo_action_server')
   PlaybackKFDemoAction()
   rospy.spin()
-
-
-
-
