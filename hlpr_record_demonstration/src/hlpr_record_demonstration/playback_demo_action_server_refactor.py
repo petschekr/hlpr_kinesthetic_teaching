@@ -153,7 +153,10 @@ class PlaybackKFDemoAction(object):
         # Check what kind of file we've received (bag vs. pkl)
         if filename.endswith('.bag'):
             # Process the bag file
-            (self.data_store, joint_flag) = self._process_bag(filename, goal.target_topic, goal.zero_marker)
+            processed = self._process_bag(filename, goal.target_topic, goal.zero_marker)
+            if processed is None:
+                return
+            (self.data_store, joint_flag) = processed
             if self.data_store is None:
                 return
     
