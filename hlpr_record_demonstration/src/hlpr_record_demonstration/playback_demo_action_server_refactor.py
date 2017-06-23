@@ -183,13 +183,18 @@ class PlaybackKFDemoAction(object):
             self.data_store = self._load_pkl(filename)
 
         # Check if we're playing the file
-        if goal.vis_only:
-            plan = self._visualize_plan(self.data_store) 
+        if goal.visualize == "only":
+            plan = self._visualize_plan(self.data_store)
             complete_msg = "Visualized plan successfully"
-        else:
+        elif goal.visualize == "true" or goal.visualize == "false":
+            if goal.visualize == "true":
+                self._visualize_plan(self.data_store)
             plan = self._execute_plan(self.data_store)
             self.data_log_pub.publish(False)
             complete_msg = "Executed plan successfully"
+        else:
+            plan = None
+            rospy.logerr("Invalid or missing visualization parameter. Should be set to \"false\" | \"true\" | \"only\"")
 
         # Return success if we've gotten to this point
         if plan is None:
