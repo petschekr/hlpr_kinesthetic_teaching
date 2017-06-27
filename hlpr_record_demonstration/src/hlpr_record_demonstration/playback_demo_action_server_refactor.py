@@ -283,8 +283,8 @@ class PlaybackKFDemoAction(object):
             if joint_flag:
                 target = self._get_arm_joint_values(data[0])
             else:
+                zeroMarker = None
                 if zeroMarkerLabel:
-                    zeroMarker = None
                     OBJECT_LOCATION_TOPIC = "object_location"
                     if not OBJECT_LOCATION_TOPIC in msg_store:
                         rospy.logerr("Playback specified a zero marker but no object locations were found in keyframe #{}".format(i))
