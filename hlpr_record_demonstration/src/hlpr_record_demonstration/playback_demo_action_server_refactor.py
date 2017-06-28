@@ -86,6 +86,7 @@ class PlaybackKFDemoAction(object):
         self._pre_plan = rospy.get_param('~pre_plan', False)
         self.gripper_status_topic = rospy.get_param('~gripper_topic', '/vector/right_gripper/stat')
         self.joint_state_topic = rospy.get_param('~joint_state_topic', '/joint_states')
+        self.publishDebugTransforms = rospy.get_param("~publish_debug_transforms", False)
 
         # Subscribe to the current gripper status
         rospy.Subscriber(self.gripper_status_topic, GripperStat, self._gripper_update, queue_size=1)
@@ -344,6 +345,21 @@ class PlaybackKFDemoAction(object):
                         target.position.y,
                         target.position.z
                     ))
+
+                    if self.publishDebugTransforms:
+                        # Broadcast for debugging
+                        t = TransformStamped()
+                        t.header.stamp = rospy.Time.now()
+                        t.header.frame_id = "base_link"
+                        t.child_frame_id = "recordedframe{}".format(i)
+                        t.transform.translation.x = target.position.x
+                        t.transform.translation.y = target.position.y
+                        t.transform.translation.z = target.position.z
+                        t.transform.rotation.x = target.orientation.x
+                        t.transform.rotation.y = target.orientation.y
+                        t.transform.rotation.z = target.orientation.z
+                        t.transform.rotation.w = target.orientation.w
+                        self.tfBroadcaster.sendTransform(t)
 
             # Store away values
             plan_obj.set_target_val(target)
