@@ -72,9 +72,9 @@ class KeyframeBagInterface():
             gripper_topics = [x for x in all_topics if GRIPPER_TOPIC in x]
 
             for topic, msg, time in bag.read_messages():
-                # Grabber and joint messages will be linked if they are within 100 ms of each other
+                # Grabber and joint messages will be linked if they are within 1000 ms of each other
                 # More precision runs into problems described at https://stackoverflow.com/a/22155830
-                time_key = round(time.to_time(), 1)
+                time_key = round(time.to_time(), 0)
 
                 data = [item for item in parsed if item["time"] == time_key]
                 shouldAppend = False
