@@ -71,7 +71,7 @@ class PlaybackKFDemoAction(object):
         self.server.start()
 
         # Load the drivers for the arm and gripper
-        self.arm_planner = ArmMoveIt()
+        self.arm_planner = ArmMoveIt(orientation_tolerance=1)
         self.manipulator = Manipulator()
         self.gripper = Gripper(prefix='right')
 
