@@ -1,4 +1,5 @@
 # -*- coding: UTF-8 -*-
+import cPickle
 import os
 import signal
 import threading
@@ -110,7 +111,7 @@ class KinestheticTeachingWidget(QWidget):
             self.status.setText("Ready.")
 
     def browseForLocation(self):
-        location = QFileDialog.getOpenFileName(filter="*.bag;;*", directory=os.path.dirname(self.demoLocation.text()))[0]
+        location = QFileDialog.getOpenFileName(filter="*.bag *.pkl;;*", directory=os.path.dirname(self.demoLocation.text()))[0]
         if len(location) == 0:
             return
 
@@ -123,40 +124,63 @@ class KinestheticTeachingWidget(QWidget):
 
         self.demoLocation.setText(location)
         self.loadLocation()
-    def loadLocation(self):
-        self.startTrajectoryButton.setEnabled(False)
-        self.startButton.setEnabled(False)
-        self.addButton.setEnabled(False)
-        self.openHandButton.setEnabled(False)
-        self.closeHandButton.setEnabled(False)
-        self.endButton.setEnabled(False)
+    def _parseLocation(self, location, partOfFolder = False):
+        items = []
+        splitPath = os.path.splitext(location)
+        if splitPath[1] == ".pkl":
+            # Pickle file created previously by playback_demo_action_server_refactor
+            with open(location, "rb") as pickleFile:
+                pickleData = cPickle.load(pickleFile)
+                playbackObjects = pickleData["playback_objects"]
+                for playbackObject in playbackObjects:
+                    item = QTreeWidgetItem()
+                    title = "(Plan for #{}) {}".format(playbackObject.keyframe_num, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(playbackObject.time_stamp.to_time())))
+                    item.setText(0, title)
+                    
+                    jointFlagItem = QTreeWidgetItem()
+                    jointFlagItem.setText(0, "Type")
+                    jointFlagItem.setText(1, "Joint space" if playbackObject.joint_flag else "EEF space")
+                    item.addChild(jointFlagItem)
 
-        location = self.demoLocation.text()
-        if os.path.isdir(location):
-            locations = [os.path.join(location, f) for f in os.listdir(location) if os.path.isfile(os.path.join(location, f)) and f.split(".")[-1] == "bag"]
+                    targetItem = QTreeWidgetItem()
+                    targetItem.setText(0, "Target")
+                    if playbackObject.joint_flag:
+                        targetItems = playbackObject.target
+                    else:
+                        targetItems = {
+                            "orientation_w": playbackObject.target.orientation.w,
+                            "orientation_x": playbackObject.target.orientation.x,
+                            "orientation_y": playbackObject.target.orientation.y,
+                            "orientation_z": playbackObject.target.orientation.z,
+                            "position_x": playbackObject.target.position.x,
+                            "position_y": playbackObject.target.position.y,
+                            "position_z": playbackObject.target.position.z
+                        }
+                    for key, value in sorted(targetItems.items()):
+                        subitem = QTreeWidgetItem()
+                        subitem.setText(0, key)
+                        subitem.setText(1, str(value))
+                        targetItem.addChild(subitem)
+                    item.addChild(targetItem)
+                    items.append(item)
+
+                # self.plan = None
+                # self.target = None
+                # self.gripper_val = None
+                # self.keyframe_num = -1
+                # self.time_stamp = None
+                # self.joint_flag = None # True - it is joint space, False = EEF space 
         else:
-            locations = [location]
-
-        if len(locations) == 0 or len(locations[0]) == 0:
-            return
-        
-        self.keyframeCount.setText("")
-        self.playbackTree.clear()
-        self.zeroMarker.clear()
-        self._showStatus("Parsing...")
-        
-        totalFrames = 0
-        for location in sorted(locations):
+            # Traditional .bag file
             try:
                 self.keyframeBagInterface = KeyframeBagInterface()
                 parsedData = self.keyframeBagInterface.parse(location)
                 objectsInScene = self.keyframeBagInterface.parseContainedObjects(location)
             except (rosbag.bag.ROSBagException, ParseException) as err:
                 self._showStatus(str(err))
-                rospy.logwarn("[%s] %s", location, str(err))
+                rospy.logwarn("[%s]: %s", location, str(err))
                 self.playbackTree.clear()
                 return
-            totalFrames += len(parsedData)
 
             objectLabels = []
             for item in objectsInScene:
@@ -165,15 +189,14 @@ class KinestheticTeachingWidget(QWidget):
                     label = "{} #{}".format(label, objectLabels.count(label) + 1)
                 objectLabels.append(item.label)
 
-                if len(locations) > 1:
+                if partOfFolder:
                     self.zeroMarker.addItem(u"{} → {}".format(label, os.path.basename(location)))
                 else:
                     self.zeroMarker.addItem(label)
 
-            items = []
             for i, keyframe in enumerate(parsedData):
                 item = QTreeWidgetItem()
-                title = "(#{}) ".format(i) + time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(keyframe["time"]))
+                title = "(#{}) ".format(i) + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(keyframe["time"]))
                 item.setText(0, title)
                 # Add children
                 for topic in sorted(keyframe["data"]):
@@ -187,6 +210,50 @@ class KinestheticTeachingWidget(QWidget):
                         topicItem.addChild(attributeValueItem)
                     item.addChild(topicItem)
                 items.append(item)
+        return items
+    def loadLocation(self):
+        self.startTrajectoryButton.setEnabled(False)
+        self.startButton.setEnabled(False)
+        self.addButton.setEnabled(False)
+        self.openHandButton.setEnabled(False)
+        self.closeHandButton.setEnabled(False)
+        self.endButton.setEnabled(False)
+
+        location = self.demoLocation.text()
+        if os.path.isdir(location):
+            locations = [os.path.join(location, f) for f in os.listdir(location) if os.path.isfile(os.path.join(location, f)) and (f.split(".")[-1] in ["bag", "pkl"])]
+        else:
+            locations = [location]
+
+        if len(locations) == 0 or len(locations[0]) == 0:
+            return
+        
+        self.keyframeCount.setText("")
+        self.playbackTree.clear()
+        self.zeroMarker.clear()
+        self._showStatus("Parsing...")
+        
+        totalFrames = 0
+        for location in sorted(locations):
+            splitPath = os.path.splitext(location)
+            bagLocation = None
+            if splitPath[1] == ".pkl":
+                bagLocation = splitPath[0] + ".bag"
+                if not os.path.isfile(bagLocation):
+                    bagLocation = "_".join(splitPath[0].split("_")[:-1]) + ".bag"
+                if not os.path.isfile(bagLocation):
+                    bagLocation = None
+                    rospy.logwarn("%s has no corresponding .bag file. Detailed keyframe data can not be displayed.", location)
+                
+            items = self._parseLocation(location, len(locations) > 1)
+            if bagLocation is not None:
+                bagItems = self._parseLocation(bagLocation, len(locations) > 1)
+                bagItemsHeader = QTreeWidgetItem()
+                bagItemsHeader.setText(0, "Keyframe data ({})".format(bagLocation))
+                bagItemsHeader.addChildren(bagItems)
+                items.append(bagItemsHeader)
+
+            totalFrames = len(items)
             if len(locations) == 1:
                 self.playbackTree.addTopLevelItems(items)
             else:
