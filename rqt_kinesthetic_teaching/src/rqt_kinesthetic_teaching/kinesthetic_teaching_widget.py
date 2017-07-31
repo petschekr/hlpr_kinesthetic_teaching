@@ -415,7 +415,7 @@ class KinestheticTeachingWidget(QWidget):
         if os.path.isdir(location):
             selected = self.playbackTree.selectedItems()
             if not selected or selected[0].parent():
-                self._showWarning("Not playable", "Please select a keyframe sequence to play.")
+                self._showWarning("Not playable", "Please select a keyframe sequence or preprocessed .pkl file to play.")
                 return
             location = selected[0].text(0)
 
