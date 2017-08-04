@@ -71,7 +71,7 @@ class PlaybackKFDemoAction(object):
         self.server.start()
 
         # Load the drivers for the arm and gripper
-        self.arm_planner = ArmMoveIt(orientation_tolerance=1)
+        self.arm_planner = ArmMoveIt(orientation_tolerance=0.01)
         self.manipulator = Manipulator()
         self.gripper = Gripper(prefix='right')
 
@@ -285,7 +285,7 @@ class PlaybackKFDemoAction(object):
                 target = self._get_arm_joint_values(data[0])
             else:
                 zeroMarker = None
-                if zeroMarkerLabel:
+                if zeroMarkerLabel and i != 0:
                     OBJECT_LOCATION_TOPIC = "object_location"
                     if not OBJECT_LOCATION_TOPIC in msg_store:
                         rospy.logerr("Playback specified a zero marker but no object locations were found in keyframe #{}".format(i))
@@ -320,6 +320,8 @@ class PlaybackKFDemoAction(object):
                         currentZero.translation.y,
                         currentZero.translation.z
                     ))
+                elif zeroMarkerLabel and i == 0:
+                    rospy.loginfo("Skipping zero marker for first frame")
                 else:
                     rospy.loginfo("No zero marker passed for keyframe #{}".format(i))
 
